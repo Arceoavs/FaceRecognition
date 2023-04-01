@@ -14,7 +14,14 @@ class IdData:
     """Keeps track of known identities and calculates id matches"""
 
     def __init__(
-        self, id_folder, mtcnn, sess, embeddings, images_placeholder, phase_train_placeholder, distance_treshold
+        self,
+        id_folder,
+        mtcnn,
+        sess,
+        embeddings,
+        images_placeholder,
+        phase_train_placeholder,
+        distance_treshold,
     ):
         print("Loading known identities: ", end="")
         self.distance_treshold = distance_treshold
@@ -31,7 +38,9 @@ class IdData:
 
         for id_name in ids:
             id_dir = os.path.join(id_folder, id_name)
-            image_paths = image_paths + [os.path.join(id_dir, img) for img in os.listdir(id_dir)]
+            image_paths = image_paths + [
+                os.path.join(id_dir, img) for img in os.listdir(id_dir)
+            ]
 
         print("Found %d images in id folder" % len(image_paths))
         aligned_images, id_image_paths = self.detect_id_faces(image_paths)
@@ -121,18 +130,25 @@ def load_model(model):
 def main(args):
     with tf.Graph().as_default():
         with tf.Session() as sess:
-
             # Setup models
             mtcnn = detect_and_align.create_mtcnn(sess, None)
 
             load_model(args.model)
             images_placeholder = tf.get_default_graph().get_tensor_by_name("input:0")
             embeddings = tf.get_default_graph().get_tensor_by_name("embeddings:0")
-            phase_train_placeholder = tf.get_default_graph().get_tensor_by_name("phase_train:0")
+            phase_train_placeholder = tf.get_default_graph().get_tensor_by_name(
+                "phase_train:0"
+            )
 
             # Load anchor IDs
             id_data = IdData(
-                args.id_folder[0], mtcnn, sess, embeddings, images_placeholder, phase_train_placeholder, args.threshold
+                args.id_folder[0],
+                mtcnn,
+                sess,
+                embeddings,
+                images_placeholder,
+                phase_train_placeholder,
+                args.threshold,
             )
 
             cap = cv2.VideoCapture(0)
@@ -148,19 +164,33 @@ def main(args):
                 _, frame = cap.read()
 
                 # Locate faces and landmarks in frame
-                face_patches, padded_bounding_boxes, landmarks = detect_and_align.detect_faces(frame, mtcnn)
+                (
+                    face_patches,
+                    padded_bounding_boxes,
+                    landmarks,
+                ) = detect_and_align.detect_faces(frame, mtcnn)
 
                 if len(face_patches) > 0:
                     face_patches = np.stack(face_patches)
-                    feed_dict = {images_placeholder: face_patches, phase_train_placeholder: False}
+                    feed_dict = {
+                        images_placeholder: face_patches,
+                        phase_train_placeholder: False,
+                    }
                     embs = sess.run(embeddings, feed_dict=feed_dict)
 
                     matching_ids, matching_distances = id_data.find_matching_ids(embs)
-                    frame_detections = {"embs": embs, "bbs": padded_bounding_boxes, "frame": frame.copy()}
+                    frame_detections = {
+                        "embs": embs,
+                        "bbs": padded_bounding_boxes,
+                        "frame": frame.copy(),
+                    }
 
                     print("Matches in frame:")
                     for bb, landmark, matching_id, dist in zip(
-                        padded_bounding_boxes, landmarks, matching_ids, matching_distances
+                        padded_bounding_boxes,
+                        landmarks,
+                        matching_ids,
+                        matching_distances,
                     ):
                         if matching_id is None:
                             matching_id = "Unknown"
@@ -170,15 +200,34 @@ def main(args):
 
                         if show_id:
                             font = cv2.FONT_HERSHEY_SIMPLEX
-                            cv2.putText(frame, matching_id, (bb[0], bb[3]), font, 1, (255, 255, 255), 1, cv2.LINE_AA)
+                            cv2.putText(
+                                frame,
+                                matching_id,
+                                (bb[0], bb[3]),
+                                font,
+                                1,
+                                (255, 255, 255),
+                                1,
+                                cv2.LINE_AA,
+                            )
                         if show_bb:
-                            cv2.rectangle(frame, (bb[0], bb[1]), (bb[2], bb[3]), (255, 0, 0), 2)
+                            cv2.rectangle(
+                                frame, (bb[0], bb[1]), (bb[2], bb[3]), (255, 0, 0), 2
+                            )
                         if show_landmarks:
                             for j in range(5):
                                 size = 1
-                                top_left = (int(landmark[j]) - size, int(landmark[j + 5]) - size)
-                                bottom_right = (int(landmark[j]) + size, int(landmark[j + 5]) + size)
-                                cv2.rectangle(frame, top_left, bottom_right, (255, 0, 255), 2)
+                                top_left = (
+                                    int(landmark[j]) - size,
+                                    int(landmark[j + 5]) - size,
+                                )
+                                bottom_right = (
+                                    int(landmark[j]) + size,
+                                    int(landmark[j + 5]) + size,
+                                )
+                                cv2.rectangle(
+                                    frame, top_left, bottom_right, (255, 0, 255), 2
+                                )
                 else:
                     print("Couldn't find a face")
 
@@ -189,7 +238,16 @@ def main(args):
 
                 if show_fps:
                     font = cv2.FONT_HERSHEY_SIMPLEX
-                    cv2.putText(frame, str(fps), (0, int(frame_height) - 5), font, 1, (255, 255, 255), 1, cv2.LINE_AA)
+                    cv2.putText(
+                        frame,
+                        str(fps),
+                        (0, int(frame_height) - 5),
+                        font,
+                        1,
+                        (255, 255, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
 
                 cv2.imshow("frame", frame)
 
@@ -205,11 +263,17 @@ def main(args):
                 elif key == ord("f"):
                     show_fps = not show_fps
                 elif key == ord("s") and frame_detections is not None:
-                    for emb, bb in zip(frame_detections["embs"], frame_detections["bbs"]):
-                        patch = frame_detections["frame"][bb[1] : bb[3], bb[0] : bb[2], :]
+                    for emb, bb in zip(
+                        frame_detections["embs"], frame_detections["bbs"]
+                    ):
+                        patch = frame_detections["frame"][
+                            bb[1] : bb[3], bb[0] : bb[2], :
+                        ]
                         cv2.imshow("frame", patch)
                         cv2.waitKey(1)
-                        new_id = easygui.enterbox("Who's in the image? Leave empty for non-valid")
+                        new_id = easygui.enterbox(
+                            "Who's in the image? Leave empty for non-valid"
+                        )
                         if len(new_id) > 0:
                             id_data.add_id(emb, new_id, patch)
 
@@ -221,6 +285,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("model", type=str, help="Path to model protobuf (.pb) file")
-    parser.add_argument("id_folder", type=str, nargs="+", help="Folder containing ID folders")
-    parser.add_argument("-t", "--threshold", type=float, help="Distance threshold defining an id match", default=1.0)
+    parser.add_argument(
+        "id_folder", type=str, nargs="+", help="Folder containing ID folders"
+    )
+    parser.add_argument(
+        "-t",
+        "--threshold",
+        type=float,
+        help="Distance threshold defining an id match",
+        default=1.0,
+    )
     main(parser.parse_args())
