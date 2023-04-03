@@ -10,7 +10,9 @@ def detect_faces(img, mtcnn):
     image_size = 160
 
     img_size = np.asarray(img.shape)[0:2]
-    bounding_boxes, landmarks = detect_face(img, mtcnn["pnet"], mtcnn["rnet"], mtcnn["onet"])
+    bounding_boxes, landmarks = detect_face(
+        img, mtcnn["pnet"], mtcnn["rnet"], mtcnn["onet"]
+    )
     nrof_bb = bounding_boxes.shape[0]
     padded_bounding_boxes = []
     face_patches = []
@@ -98,7 +100,7 @@ def nms(boxes, threshold, method):
         w = np.maximum(0.0, xx2 - xx1 + 1)
         h = np.maximum(0.0, yy2 - yy1 + 1)
         inter = w * h
-        if method is "Min":
+        if method == "Min":
             o = inter / np.minimum(area[i], area[idx])
         else:
             o = inter / (area[i] + area[idx] - inter)
@@ -205,7 +207,7 @@ class Network(object):
         self.setup()
 
     def setup(self):
-        """Construct the network. """
+        """Construct the network."""
         raise NotImplementedError("Must be implemented by the subclass.")
 
     def load(self, data_path, session, ignore_missing=False):
@@ -217,10 +219,10 @@ class Network(object):
         data_dict = np.load(data_path, encoding="latin1", allow_pickle=True).item()
 
         for op_name in data_dict:
-            with tf.variable_scope(op_name, reuse=True):
+            with tf.compat.v1.variable_scope(op_name, reuse=True):
                 for param_name, data in iteritems(data_dict[op_name]):
                     try:
-                        var = tf.get_variable(param_name)
+                        var = tf.compat.v1.get_variable(param_name)
                         session.run(var.assign(data))
                     except ValueError:
                         if not ignore_missing:
@@ -254,14 +256,27 @@ class Network(object):
 
     def make_var(self, name, shape):
         """Creates a new TensorFlow variable."""
-        return tf.get_variable(name, shape, trainable=self.trainable)
+        return tf.compat.v1.get_variable(name, shape, trainable=self.trainable)
 
     def validate_padding(self, padding):
         """Verifies that the padding is one of the supported ones."""
         assert padding in ("SAME", "VALID")
 
     @layer
-    def conv(self, inp, k_h, k_w, c_o, s_h, s_w, name, relu=True, padding="SAME", group=1, biased=True):
+    def conv(
+        self,
+        inp,
+        k_h,
+        k_w,
+        c_o,
+        s_h,
+        s_w,
+        name,
+        relu=True,
+        padding="SAME",
+        group=1,
+        biased=True,
+    ):
         # Verify that the padding is acceptable
         self.validate_padding(padding)
         # Get the number of channels in the input
@@ -272,9 +287,9 @@ class Network(object):
 
         # Convolution for a given input and kernel
         def convolve(i, k):
-            return tf.nn.conv2d(i, k, [1, s_h, s_w, 1], padding=padding)
+            return tf.nn.conv2d(i, filters=k, strides=[1, s_h, s_w, 1], padding=padding)
 
-        with tf.variable_scope(name) as scope:
+        with tf.compat.v1.variable_scope(name) as scope:
             kernel = self.make_var("weights", shape=[k_h, k_w, c_i // group, c_o])
             # This is the common-case. Convolve the input without any further complications.
             output = convolve(inp, kernel)
@@ -289,7 +304,7 @@ class Network(object):
 
     @layer
     def prelu(self, inp, name):
-        with tf.variable_scope(name):
+        with tf.compat.v1.variable_scope(name):
             i = int(inp.get_shape()[-1])
             alpha = self.make_var("alpha", shape=(i,))
             output = tf.nn.relu(inp) + tf.multiply(alpha, -tf.nn.relu(-inp))
@@ -298,11 +313,17 @@ class Network(object):
     @layer
     def max_pool(self, inp, k_h, k_w, s_h, s_w, name, padding="SAME"):
         self.validate_padding(padding)
-        return tf.nn.max_pool(inp, ksize=[1, k_h, k_w, 1], strides=[1, s_h, s_w, 1], padding=padding, name=name)
+        return tf.nn.max_pool2d(
+            input=inp,
+            ksize=[1, k_h, k_w, 1],
+            strides=[1, s_h, s_w, 1],
+            padding=padding,
+            name=name,
+        )
 
     @layer
     def fc(self, inp, num_out, name, relu=True):
-        with tf.variable_scope(name):
+        with tf.compat.v1.variable_scope(name):
             input_shape = inp.get_shape()
             if input_shape.ndims == 4:
                 # The input is spatial. Vectorize it first.
@@ -311,19 +332,19 @@ class Network(object):
                     dim *= int(d)
                 feed_in = tf.reshape(inp, [-1, dim])
             else:
-                feed_in, dim = (inp, input_shape[-1].value)
+                feed_in, dim = (inp, input_shape[-1])
             weights = self.make_var("weights", shape=[dim, num_out])
             biases = self.make_var("biases", [num_out])
-            op = tf.nn.relu_layer if relu else tf.nn.xw_plus_b
+            op = tf.compat.v1.nn.relu_layer if relu else tf.compat.v1.nn.xw_plus_b
             fc = op(feed_in, weights, biases, name=name)
             return fc
 
     @layer
     def softmax(self, target, axis, name=None):
-        max_axis = tf.reduce_max(target, axis, keep_dims=True)
+        max_axis = tf.reduce_max(target, axis, keepdims=True)
         target_exp = tf.exp(target - max_axis)
-        normalize = tf.reduce_sum(target_exp, axis, keep_dims=True)
-        softmax = tf.div(target_exp, normalize, name)
+        normalize = tf.reduce_sum(target_exp, axis, keepdims=True)
+        softmax = tf.compat.v1.div(target_exp, normalize, name)
         return softmax
 
 
@@ -396,35 +417,39 @@ def create_mtcnn(sess, model_path):
     if not model_path:
         model_path, _ = os.path.split(os.path.realpath(__file__))
 
-    with tf.variable_scope("pnet"):
-        data = tf.placeholder(tf.float32, (None, None, None, 3), "input")
+    with tf.compat.v1.variable_scope("pnet"):
+        data = tf.compat.v1.placeholder(tf.float32, (None, None, None, 3), "input")
         pnet = PNet({"data": data})
         pnet.load(os.path.join(model_path, "det1.npy"), sess)
-    with tf.variable_scope("rnet"):
-        data = tf.placeholder(tf.float32, (None, 24, 24, 3), "input")
+    with tf.compat.v1.variable_scope("rnet"):
+        data = tf.compat.v1.placeholder(tf.float32, (None, 24, 24, 3), "input")
         rnet = RNet({"data": data})
         rnet.load(os.path.join(model_path, "det2.npy"), sess)
-    with tf.variable_scope("onet"):
-        data = tf.placeholder(tf.float32, (None, 48, 48, 3), "input")
+    with tf.compat.v1.variable_scope("onet"):
+        data = tf.compat.v1.placeholder(tf.float32, (None, 48, 48, 3), "input")
         onet = ONet({"data": data})
         onet.load(os.path.join(model_path, "det3.npy"), sess)
 
     def pnet_fun(img):
-        return sess.run(("pnet/conv4-2/BiasAdd:0", "pnet/prob1:0"), feed_dict={"pnet/input:0": img})
+        return sess.run(
+            ("pnet/conv4-2/BiasAdd:0", "pnet/prob1:0"), feed_dict={"pnet/input:0": img}
+        )
 
     def rnet_fun(img):
-        return sess.run(("rnet/conv5-2/conv5-2:0", "rnet/prob1:0"), feed_dict={"rnet/input:0": img})
+        return sess.run(
+            ("rnet/conv5-2/conv5-2:0", "rnet/prob1:0"), feed_dict={"rnet/input:0": img}
+        )
 
     def onet_fun(img):
         return sess.run(
-            ("onet/conv6-2/conv6-2:0", "onet/conv6-3/conv6-3:0", "onet/prob1:0"), feed_dict={"onet/input:0": img}
+            ("onet/conv6-2/conv6-2:0", "onet/conv6-3/conv6-3:0", "onet/prob1:0"),
+            feed_dict={"onet/input:0": img},
         )
 
     return {"pnet": pnet_fun, "rnet": rnet_fun, "onet": onet_fun}
 
 
 def detect_face(img, pnet, rnet, onet):
-
     minsize = 20  # minimum size of face
     threshold = [0.6, 0.7, 0.7]  # three steps's threshold
     factor = 0.709  # scale factor
@@ -457,7 +482,9 @@ def detect_face(img, pnet, rnet, onet):
         out0 = np.transpose(out[0], (0, 2, 1, 3))
         out1 = np.transpose(out[1], (0, 2, 1, 3))
 
-        boxes, _ = generateBoundingBox(out1[0, :, :, 1].copy(), out0[0, :, :, :].copy(), scale, threshold[0])
+        boxes, _ = generateBoundingBox(
+            out1[0, :, :, 1].copy(), out0[0, :, :, :].copy(), scale, threshold[0]
+        )
 
         # inter-scale nms
         pick = nms(boxes.copy(), 0.5, "Union")
@@ -486,8 +513,15 @@ def detect_face(img, pnet, rnet, onet):
         tempimg = np.zeros((24, 24, 3, numbox))
         for k in range(0, numbox):
             tmp = np.zeros((int(tmph[k]), int(tmpw[k]), 3))
-            tmp[dy[k] - 1 : edy[k], dx[k] - 1 : edx[k], :] = img[y[k] - 1 : ey[k], x[k] - 1 : ex[k], :]
-            if tmp.shape[0] > 0 and tmp.shape[1] > 0 or tmp.shape[0] == 0 and tmp.shape[1] == 0:
+            tmp[dy[k] - 1 : edy[k], dx[k] - 1 : edx[k], :] = img[
+                y[k] - 1 : ey[k], x[k] - 1 : ex[k], :
+            ]
+            if (
+                tmp.shape[0] > 0
+                and tmp.shape[1] > 0
+                or tmp.shape[0] == 0
+                and tmp.shape[1] == 0
+            ):
                 tempimg[:, :, :, k] = imresample(tmp, (24, 24))
             else:
                 return np.empty()
@@ -498,7 +532,9 @@ def detect_face(img, pnet, rnet, onet):
         out1 = np.transpose(out[1])
         score = out1[1, :]
         ipass = np.where(score > threshold[1])
-        total_boxes = np.hstack([total_boxes[ipass[0], 0:4].copy(), np.expand_dims(score[ipass].copy(), 1)])
+        total_boxes = np.hstack(
+            [total_boxes[ipass[0], 0:4].copy(), np.expand_dims(score[ipass].copy(), 1)]
+        )
         mv = out0[:, ipass[0]]
         if total_boxes.shape[0] > 0:
             pick = nms(total_boxes, 0.7, "Union")
@@ -514,8 +550,15 @@ def detect_face(img, pnet, rnet, onet):
         tempimg = np.zeros((48, 48, 3, numbox))
         for k in range(0, numbox):
             tmp = np.zeros((int(tmph[k]), int(tmpw[k]), 3))
-            tmp[dy[k] - 1 : edy[k], dx[k] - 1 : edx[k], :] = img[y[k] - 1 : ey[k], x[k] - 1 : ex[k], :]
-            if tmp.shape[0] > 0 and tmp.shape[1] > 0 or tmp.shape[0] == 0 and tmp.shape[1] == 0:
+            tmp[dy[k] - 1 : edy[k], dx[k] - 1 : edx[k], :] = img[
+                y[k] - 1 : ey[k], x[k] - 1 : ex[k], :
+            ]
+            if (
+                tmp.shape[0] > 0
+                and tmp.shape[1] > 0
+                or tmp.shape[0] == 0
+                and tmp.shape[1] == 0
+            ):
                 tempimg[:, :, :, k] = imresample(tmp, (48, 48))
             else:
                 return np.empty()
@@ -529,13 +572,21 @@ def detect_face(img, pnet, rnet, onet):
         points = out1
         ipass = np.where(score > threshold[2])
         points = points[:, ipass[0]]
-        total_boxes = np.hstack([total_boxes[ipass[0], 0:4].copy(), np.expand_dims(score[ipass].copy(), 1)])
+        total_boxes = np.hstack(
+            [total_boxes[ipass[0], 0:4].copy(), np.expand_dims(score[ipass].copy(), 1)]
+        )
         mv = out0[:, ipass[0]]
 
         w = total_boxes[:, 2] - total_boxes[:, 0] + 1
         h = total_boxes[:, 3] - total_boxes[:, 1] + 1
-        points[0:5, :] = np.tile(w, (5, 1)) * points[0:5, :] + np.tile(total_boxes[:, 0], (5, 1)) - 1
-        points[5:10, :] = np.tile(h, (5, 1)) * points[5:10, :] + np.tile(total_boxes[:, 1], (5, 1)) - 1
+        points[0:5, :] = (
+            np.tile(w, (5, 1)) * points[0:5, :] + np.tile(total_boxes[:, 0], (5, 1)) - 1
+        )
+        points[5:10, :] = (
+            np.tile(h, (5, 1)) * points[5:10, :]
+            + np.tile(total_boxes[:, 1], (5, 1))
+            - 1
+        )
         if total_boxes.shape[0] > 0:
             total_boxes = bbreg(total_boxes.copy(), np.transpose(mv))
             pick = nms(total_boxes.copy(), 0.7, "Min")
