@@ -135,6 +135,14 @@ class IdData:
         return zip(*matching_results) if self.id_names else (None, [np.inf] * len(embs))
 
 
+def setup_camera():
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FPS, 1)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+    return cap
+
+
 def load_model(model):
     """Load the model from the given path."""
 
@@ -224,17 +232,16 @@ def process_frame(
 def handle_key_press(show_options, key, frame_detections, id_data):
     if key == ord("q"):
         return False
-    elif key == ord("l"):
-        show_options["landmarks"] = not show_options["landmarks"]
-    elif key == ord("b"):
-        show_options["bb"] = not show_options["bb"]
-    elif key == ord("i"):
-        show_options["id"] = not show_options["id"]
-    elif key == ord("f"):
-        show_options["fps"] = not show_options["fps"]
-    elif key == ord("s") and frame_detections is not None:
-        save_frame_detections(id_data, frame_detections)
-    return True
+    show_options["landmarks"] ^= key == ord("l")
+    show_options["bb"] ^= key == ord("b")
+    show_options["id"] ^= key == ord("i")
+    show_options["fps"] ^= key == ord("f")
+    return (
+        key != ord("s")
+        or frame_detections is None
+        or save_frame_detections(id_data, frame_detections)
+        or True
+    )
 
 
 def save_frame_detections(id_data, frame_detections):
@@ -247,15 +254,15 @@ def save_frame_detections(id_data, frame_detections):
             id_data.add_id(emb, new_id, patch)
 
 
-def main(args):
+def main(args: argparse.Namespace) -> None:
     with tf.Graph().as_default(), tf.compat.v1.Session() as sess:
         # Setup models
         mtcnn = detect_and_align.create_mtcnn(sess, None)
         load_model(args.model)
-        get_tensor = tf.compat.v1.get_default_graph().get_tensor_by_name
-        images_placeholder = get_tensor("input:0")
-        embeddings = get_tensor("embeddings:0")
-        phase_train_placeholder = get_tensor("phase_train:0")
+        images_placeholder, embeddings, phase_train_placeholder = [
+            tf.get_default_graph().get_tensor_by_name(name)
+            for name in ["input:0", "embeddings:0", "phase_train:0"]
+        ]
 
         # Load anchor IDs
         id_data = IdData(
@@ -268,11 +275,8 @@ def main(args):
             args.threshold,
         )
 
-        cap = cv2.VideoCapture(0)
-        cap.set(cv2.CAP_PROP_FPS, 1)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-        frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        # Setup camera
+        cap = setup_camera()
 
         show_options = {"landmarks": False, "bb": False, "id": True, "fps": False}
         frame_detections = None
@@ -294,30 +298,26 @@ def main(args):
 
             end = time.time()
 
-            seconds = end - start
-            fps = round(1 / seconds, 2)
-
-            if show_options["fps"]:
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                cv2.putText(
-                    frame,
-                    str(fps),
-                    (0, int(frame_height) - 5),
-                    font,
-                    1,
-                    (255, 255, 255),
-                    1,
-                    cv2.LINE_AA,
-                )
+            fps = round(1 / (end - start), 2) if show_options.get("fps") else None
+            cv2.putText(
+                frame,
+                str(fps),
+                (0, int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (255, 255, 255),
+                1,
+                cv2.LINE_AA,
+            ) if fps else None
 
             cv2.imshow("frame", frame)
 
-            key = cv2.waitKey(1)
-            if not handle_key_press(show_options, key, frame_detections, id_data):
+            if not handle_key_press(
+                show_options, cv2.waitKey(1), frame_detections, id_data
+            ):
                 break
 
-        cap.release()
-        cv2.destroyAllWindows()
+        cap.release(), cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
