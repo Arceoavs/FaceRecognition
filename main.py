@@ -260,7 +260,7 @@ def main(args: argparse.Namespace) -> None:
         mtcnn = detect_and_align.create_mtcnn(sess, None)
         load_model(args.model)
         images_placeholder, embeddings, phase_train_placeholder = [
-            tf.get_default_graph().get_tensor_by_name(name)
+            tf.compat.v1.get_default_graph().get_tensor_by_name(name)
             for name in ["input:0", "embeddings:0", "phase_train:0"]
         ]
 
