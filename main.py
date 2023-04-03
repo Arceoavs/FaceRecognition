@@ -1,13 +1,14 @@
-from sklearn.metrics.pairwise import pairwise_distances
-from tensorflow.python.platform import gfile
-import tensorflow as tf
-import numpy as np
-import detect_and_align
 import argparse
-import easygui
-import time
-import cv2
 import os
+import time
+
+import cv2
+import easygui
+import numpy as np
+import tensorflow as tf
+from sklearn.metrics.pairwise import pairwise_distances
+
+import detect_and_align
 
 
 class IdData:
@@ -152,6 +153,100 @@ def load_model(model):
         tf.import_graph_def(graph_def, name="")
 
 
+def process_frame(
+    show_options,
+    frame,
+    mtcnn,
+    sess,
+    embeddings,
+    images_placeholder,
+    phase_train_placeholder,
+    id_data,
+):
+    (
+        face_patches,
+        padded_bounding_boxes,
+        landmarks,
+    ) = detect_and_align.detect_faces(frame, mtcnn)
+
+    if face_patches:
+        face_patches = np.stack(face_patches)
+        feed_dict = {
+            images_placeholder: face_patches,
+            phase_train_placeholder: False,
+        }
+        embs = sess.run(embeddings, feed_dict=feed_dict)
+
+        matching_ids, matching_distances = id_data.find_matching_ids(embs)
+
+        print("Matches in frame:")
+        for bb, landmark, matching_id, dist in zip(
+            padded_bounding_boxes,
+            landmarks,
+            matching_ids,
+            matching_distances,
+        ):
+            matching_id = matching_id or "Unknown"
+            print(f"Hi {matching_id}! Distance: {dist:.4f}")
+
+            # Draw additional info on the frame.
+            if show_options.get("id"):
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                cv2.putText(
+                    frame,
+                    matching_id,
+                    (bb[0], bb[3]),
+                    font,
+                    1,
+                    (255, 255, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
+            if show_options.get("bb"):
+                cv2.rectangle(frame, (bb[0], bb[1]), (bb[2], bb[3]), (255, 0, 0), 2)
+            if show_options.get("landmarks"):
+                for j in range(5):
+                    size = 1
+                    top_left = (
+                        int(landmark[j]) - size,
+                        int(landmark[j + 5]) - size,
+                    )
+                    bottom_right = (
+                        int(landmark[j]) + size,
+                        int(landmark[j + 5]) + size,
+                    )
+                    cv2.rectangle(frame, top_left, bottom_right, (255, 0, 255), 2)
+    else:
+        print("Couldn't find a face")
+    return
+
+
+def handle_key_press(show_options, key, frame_detections, id_data):
+    if key == ord("q"):
+        return False
+    elif key == ord("l"):
+        show_options["landmarks"] = not show_options["landmarks"]
+    elif key == ord("b"):
+        show_options["bb"] = not show_options["bb"]
+    elif key == ord("i"):
+        show_options["id"] = not show_options["id"]
+    elif key == ord("f"):
+        show_options["fps"] = not show_options["fps"]
+    elif key == ord("s") and frame_detections is not None:
+        save_frame_detections(id_data, frame_detections)
+    return True
+
+
+def save_frame_detections(id_data, frame_detections):
+    for emb, bb in zip(frame_detections["embs"], frame_detections["bbs"]):
+        patch = frame_detections["frame"][bb[1] : bb[3], bb[0] : bb[2], :]
+        cv2.imshow("frame", patch)
+        cv2.waitKey(1)
+        new_id = easygui.enterbox("Who's in the image? Leave empty for non-valid")
+        if len(new_id) > 0:
+            id_data.add_id(emb, new_id, patch)
+
+
 def main(args):
     with tf.Graph().as_default(), tf.compat.v1.Session() as sess:
         # Setup models
@@ -186,73 +281,16 @@ def main(args):
             start = time.time()
             _, frame = cap.read()
 
-            # Locate faces and landmarks in frame
-            (
-                face_patches,
-                padded_bounding_boxes,
-                landmarks,
-            ) = detect_and_align.detect_faces(frame, mtcnn)
-
-            if len(face_patches) > 0:
-                face_patches = np.stack(face_patches)
-                feed_dict = {
-                    images_placeholder: face_patches,
-                    phase_train_placeholder: False,
-                }
-                embs = sess.run(embeddings, feed_dict=feed_dict)
-
-                matching_ids, matching_distances = id_data.find_matching_ids(embs)
-                frame_detections = {
-                    "embs": embs,
-                    "bbs": padded_bounding_boxes,
-                    "frame": frame.copy(),
-                }
-
-                print("Matches in frame:")
-                for bb, landmark, matching_id, dist in zip(
-                    padded_bounding_boxes,
-                    landmarks,
-                    matching_ids,
-                    matching_distances,
-                ):
-                    if matching_id is None:
-                        matching_id = "Unknown"
-                        print("Unknown! Couldn't fint match.")
-                    else:
-                        print("Hi %s! Distance: %1.4f" % (matching_id, dist))
-
-                    if show_options["id"]:
-                        font = cv2.FONT_HERSHEY_SIMPLEX
-                        cv2.putText(
-                            frame,
-                            matching_id,
-                            (bb[0], bb[3]),
-                            font,
-                            1,
-                            (255, 255, 255),
-                            1,
-                            cv2.LINE_AA,
-                        )
-                    if show_options["bb"]:
-                        cv2.rectangle(
-                            frame, (bb[0], bb[1]), (bb[2], bb[3]), (255, 0, 0), 2
-                        )
-                    if show_options["landmarks"]:
-                        for j in range(5):
-                            size = 1
-                            top_left = (
-                                int(landmark[j]) - size,
-                                int(landmark[j + 5]) - size,
-                            )
-                            bottom_right = (
-                                int(landmark[j]) + size,
-                                int(landmark[j + 5]) + size,
-                            )
-                            cv2.rectangle(
-                                frame, top_left, bottom_right, (255, 0, 255), 2
-                            )
-            else:
-                print("Couldn't find a face")
+            process_frame(
+                show_options,
+                frame,
+                mtcnn,
+                sess,
+                embeddings,
+                images_placeholder,
+                phase_train_placeholder,
+                id_data,
+            )
 
             end = time.time()
 
@@ -275,26 +313,8 @@ def main(args):
             cv2.imshow("frame", frame)
 
             key = cv2.waitKey(1)
-            if key == ord("q"):
+            if not handle_key_press(show_options, key, frame_detections, id_data):
                 break
-            elif key == ord("l"):
-                show_options["landmarks"] = not show_options["landmarks"]
-            elif key == ord("b"):
-                show_options["bb"] = not show_options["bb"]
-            elif key == ord("i"):
-                show_options["id"] = not show_options["id"]
-            elif key == ord("f"):
-                show_options["fps"] = not show_options["fps"]
-            elif key == ord("s") and frame_detections is not None:
-                for emb, bb in zip(frame_detections["embs"], frame_detections["bbs"]):
-                    patch = frame_detections["frame"][bb[1] : bb[3], bb[0] : bb[2], :]
-                    cv2.imshow("frame", patch)
-                    cv2.waitKey(1)
-                    new_id = easygui.enterbox(
-                        "Who's in the image? Leave empty for non-valid"
-                    )
-                    if len(new_id) > 0:
-                        id_data.add_id(emb, new_id, patch)
 
         cap.release()
         cv2.destroyAllWindows()
@@ -302,7 +322,6 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-
     parser.add_argument("model", type=str, help="Path to model protobuf (.pb) file")
     parser.add_argument(
         "id_folder", type=str, nargs="+", help="Folder containing ID folders"
