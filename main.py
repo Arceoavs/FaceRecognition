@@ -23,64 +23,75 @@ class IdData:
         phase_train_placeholder,
         distance_treshold,
     ):
-        print("Loading known identities: ", end="")
+        print(f"Loading known identities: ", end="")
         self.distance_treshold = distance_treshold
         self.id_folder = id_folder
         self.mtcnn = mtcnn
         self.id_names = []
         self.embeddings = None
 
-        image_paths = []
         os.makedirs(id_folder, exist_ok=True)
-        ids = os.listdir(os.path.expanduser(id_folder))
-        if not ids:
+        image_paths = [
+            os.path.join(id_folder, id_name, img)
+            for id_name in os.listdir(os.path.expanduser(id_folder))
+            for img in os.listdir(os.path.join(id_folder, id_name))
+        ]
+
+        if not image_paths:
             return
 
-        for id_name in ids:
-            id_dir = os.path.join(id_folder, id_name)
-            image_paths = image_paths + [
-                os.path.join(id_dir, img) for img in os.listdir(id_dir)
-            ]
-
-        print("Found %d images in id folder" % len(image_paths))
+        print(f"Found {len(image_paths)} images in id folder")
         aligned_images, id_image_paths = self.detect_id_faces(image_paths)
-        feed_dict = {images_placeholder: aligned_images, phase_train_placeholder: False}
+        feed_dict = {
+            images_placeholder: aligned_images,
+            phase_train_placeholder: False,
+        }
         self.embeddings = sess.run(embeddings, feed_dict=feed_dict)
 
         if len(id_image_paths) < 5:
             self.print_distance_table(id_image_paths)
 
     def add_id(self, embedding, new_id, face_patch):
-        if self.embeddings is None:
-            self.embeddings = np.atleast_2d(embedding)
-        else:
-            self.embeddings = np.vstack([self.embeddings, embedding])
+        self.embeddings = (
+            np.atleast_2d(embedding)
+            if self.embeddings is None
+            else np.vstack([self.embeddings, embedding])
+        )
         self.id_names.append(new_id)
+
         id_folder = os.path.join(self.id_folder, new_id)
         os.makedirs(id_folder, exist_ok=True)
-        filenames = [s.split(".")[0] for s in os.listdir(id_folder)]
-        numbered_filenames = [int(f) for f in filenames if f.isdigit()]
-        img_number = max(numbered_filenames) + 1 if numbered_filenames else 0
-        cv2.imwrite(os.path.join(id_folder, f"{img_number}.jpg"), face_patch)
+
+        numbered_filenames = [
+            int(os.path.splitext(f)[0])
+            for f in os.listdir(id_folder)
+            if os.path.splitext(f)[0].isdigit()
+        ]
+        img_number = max(numbered_filenames, default=-1) + 1
+        output_filename = os.path.join(id_folder, f"{img_number}.jpg")
+        cv2.imwrite(output_filename, face_patch)
 
     def detect_id_faces(self, image_paths):
         aligned_images = []
         id_image_paths = []
         for image_path in image_paths:
-            image = cv2.imread(os.path.expanduser(image_path), cv2.IMREAD_COLOR)
+            image = cv2.imread(image_path, cv2.IMREAD_COLOR)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             face_patches, _, _ = detect_and_align.detect_faces(image, self.mtcnn)
             if len(face_patches) > 1:
-                print(
-                    "Warning: Found multiple faces in id image: %s" % image_path
-                    + "\nMake sure to only have one face in the id images. "
-                    + "If that's the case then it's a false positive detection and"
-                    + " you can solve it by increasing the thresolds of the cascade network"
+                warning_msg = (
+                    "Warning: Found multiple faces in id image: %s\n"
+                    "Make sure to only have one face in the id images. "
+                    "If that's the case then it's a false positive detection and "
+                    "you can solve it by increasing the thresholds of the cascade network"
+                    % os.path.basename(image_path)
                 )
-            aligned_images = aligned_images + face_patches
-            id_image_paths += [image_path] * len(face_patches)
-            path = os.path.dirname(image_path)
-            self.id_names += [os.path.basename(path)] * len(face_patches)
+                print(warning_msg)
+            aligned_images.extend(face_patches)
+            id_image_paths.extend([image_path] * len(face_patches))
+            self.id_names += [os.path.basename(os.path.dirname(image_path))] * len(
+                face_patches
+            )
 
         return np.stack(aligned_images), id_image_paths
 
