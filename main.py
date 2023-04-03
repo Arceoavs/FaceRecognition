@@ -117,14 +117,14 @@ class IdData:
 
 def load_model(model):
     model_exp = os.path.expanduser(model)
-    if os.path.isfile(model_exp):
-        print("Loading model filename: %s" % model_exp)
-        with tf.io.gfile.GFile(model_exp, "rb") as f:
-            graph_def = tf.compat.v1.GraphDef()
-            graph_def.ParseFromString(f.read())
-            tf.import_graph_def(graph_def, name="")
-    else:
+    if not os.path.isfile(model_exp):
         raise ValueError("Specify model file, not directory!")
+
+    print(f"Loading model filename: {model_exp}")
+    with tf.io.gfile.GFile(model_exp, "rb") as f:
+        graph_def = tf.compat.v1.GraphDef()
+        graph_def.ParseFromString(f.read())
+        tf.import_graph_def(graph_def, name="")
 
 
 def main(args):
