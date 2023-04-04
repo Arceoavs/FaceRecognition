@@ -1,11 +1,13 @@
 import argparse
 import os
 import time
+import threading
 
 import cv2
 import easygui
 import numpy as np
 import tensorflow as tf
+from playsound import playsound
 from sklearn.metrics.pairwise import pairwise_distances
 from tensorflow.python.platform import gfile
 
@@ -159,10 +161,13 @@ def main(args):
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 144)
         frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
-        show_landmarks = False
-        show_bb = False
-        show_id = True
-        show_fps = False
+        display_options = {
+            "landmarks": False,
+            "bounding_box": False,
+            "id": True,
+            "fps": False,
+        }
+
         frame_detections = None
         while True:
             start = time.time()
@@ -203,36 +208,16 @@ def main(args):
                     else:
                         print("Hi %s! Distance: %1.4f" % (matching_id, dist))
 
-                    if show_id:
-                        font = cv2.FONT_HERSHEY_SIMPLEX
-                        cv2.putText(
-                            frame,
-                            matching_id,
-                            (bb[0], bb[3]),
-                            font,
-                            1,
-                            (255, 255, 255),
-                            1,
-                            cv2.LINE_AA,
-                        )
-                    if show_bb:
-                        cv2.rectangle(
-                            frame, (bb[0], bb[1]), (bb[2], bb[3]), (255, 0, 0), 2
-                        )
-                    if show_landmarks:
-                        for j in range(5):
-                            size = 1
-                            top_left = (
-                                int(landmark[j]) - size,
-                                int(landmark[j + 5]) - size,
-                            )
-                            bottom_right = (
-                                int(landmark[j]) + size,
-                                int(landmark[j + 5]) + size,
-                            )
-                            cv2.rectangle(
-                                frame, top_left, bottom_right, (255, 0, 255), 2
-                            )
+                    if matching_id == "Arnold":
+                        start_siren()
+
+                    if display_options["id"]:
+                        show_id_on_screen(frame, bb, matching_id)
+                    if display_options["bounding_box"]:
+                        show_bb_on_screen(frame, bb)
+                    if display_options["landmarks"]:
+                        show_landmarks_on_screen(frame, landmark)
+
             else:
                 print("Couldn't find a face")
 
@@ -241,18 +226,8 @@ def main(args):
             seconds = end - start
             fps = round(1 / seconds, 2)
 
-            if show_fps:
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                cv2.putText(
-                    frame,
-                    str(fps),
-                    (0, int(frame_height) - 5),
-                    font,
-                    1,
-                    (255, 255, 255),
-                    1,
-                    cv2.LINE_AA,
-                )
+            if display_options["fps"]:
+                show_fps_on_screen(frame_height, frame, fps)
 
             cv2.imshow("frame", frame)
 
@@ -260,13 +235,13 @@ def main(args):
             if key == ord("q"):
                 break
             elif key == ord("l"):
-                show_landmarks = not show_landmarks
+                display_options["landmarks"] = not display_options["landmarks"]
             elif key == ord("b"):
-                show_bb = not show_bb
+                display_options["bounding_box"] = not display_options["bounding_box"]
             elif key == ord("i"):
-                show_id = not show_id
+                display_options["id"] = not display_options["id"]
             elif key == ord("f"):
-                show_fps = not show_fps
+                display_options["fps"] = not display_options["fps"]
             elif key == ord("s") and frame_detections is not None:
                 for emb, bb in zip(frame_detections["embs"], frame_detections["bbs"]):
                     patch = frame_detections["frame"][bb[1] : bb[3], bb[0] : bb[2], :]
@@ -280,6 +255,60 @@ def main(args):
 
         cap.release()
         cv2.destroyAllWindows()
+
+
+def show_id_on_screen(frame, bb, matching_id):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(
+        frame,
+        matching_id,
+        (bb[0], bb[3]),
+        font,
+        1,
+        (255, 255, 255),
+        1,
+        cv2.LINE_AA,
+    )
+
+
+def show_bb_on_screen(frame, bb):
+    cv2.rectangle(frame, (bb[0], bb[1]), (bb[2], bb[3]), (255, 0, 0), 2)
+
+
+def show_landmarks_on_screen(frame, landmark):
+    for j in range(5):
+        size = 1
+        top_left = (
+            int(landmark[j]) - size,
+            int(landmark[j + 5]) - size,
+        )
+        bottom_right = (
+            int(landmark[j]) + size,
+            int(landmark[j + 5]) + size,
+        )
+        cv2.rectangle(frame, top_left, bottom_right, (255, 0, 255), 2)
+
+
+def show_fps_on_screen(frame_height, frame, fps):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(
+        frame,
+        str(fps),
+        (0, int(frame_height) - 5),
+        font,
+        1,
+        (255, 255, 255),
+        1,
+        cv2.LINE_AA,
+    )
+
+
+def start_siren():
+    if not threading.active_count() > 1:  # check if sound is already playing
+        sound_file = (
+            "sound\zapsplat_emergency_siren_beep_warning_nuclear_meltdown_84854.mp3"
+        )
+        threading.Thread(target=playsound, args=(sound_file,)).start()
 
 
 if __name__ == "__main__":
