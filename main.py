@@ -158,6 +158,8 @@ def main(args):
             )
 
             cap = cv2.VideoCapture(0)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 192)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 144)
             frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
             show_landmarks = False
